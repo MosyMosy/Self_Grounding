@@ -15,7 +15,7 @@ from dataset.bop import BOP_dataset, BOP_dataset_info, BOP_obj_template_dataset
 from descriptor.dino_wraper import Dino_Descriptors, Dino_Wraper
 from descriptor.sam_wraper import Sam_Wraper
 
-from pipeline_util import pipeline_step, seed_all
+from pipeline_util import pipeline_step, seed_all, extract_features
 
 
 dataset_name = "tless"
@@ -24,7 +24,7 @@ test = False
 
 
 dataset_settings = {
-    "root_dir": f"/home/epi/Moslem/dataset/bop/{dataset_name}",  # "/export/datasets/public/3d/BOP/T-LESS",
+    "root_dir": f"/export/datasets/public/3d/BOP/{dataset_name}",  # "/export/datasets/public/3d/BOP/T-LESS",
     "dataset_info": BOP_dataset_info[dataset_name],
     "depth_name_template": BOP_dataset_info[dataset_name]["depth_name_template"],
 }
@@ -105,13 +105,13 @@ def run_pipeline(device):
         if os.path.exists(template_path):
             pipeline_step.print_full_width("Loading the object's templates features")
             template_dic = torch.load(template_path)
+            obj_templates_feats = template_dic["obj_templates_feats"]
             obj_templates_average_feats = template_dic["obj_templates_average_feats"]
 
             scaled_obj_templates_feats = template_dic["scaled_obj_templates_feats"]
             scaled_obj_templates_average_feats = template_dic[
                 "scaled_obj_templates_average_feats"
             ]
-            obj_patched_max_size = template_dic["obj_patched_max_size"]
         else:
             with pipeline_step(
                 "Adding object's templates features to the object's point cloud"
@@ -130,50 +130,39 @@ def run_pipeline(device):
                 obj_template_dl = obj_template_ds.get_dataloader(
                     batch_size=1, num_workers=2, shuffle=False
                 )
+
+                obj_templates_feats = []
                 obj_templates_average_feats = []
                 scaled_obj_templates_feats = []
                 scaled_obj_templates_average_feats = []
-                obj_patched_max_size = []
                 for sample in tqdm(
                     obj_template_dl, desc="Adding features to the point cloud"
                 ):
                     image = sample["image"][0].to(device)
                     masks = sample["mask"][0].to(device)
-                    xyzs = sample["xyz"][0].to(device)
-
-                    obj_pc = obj_template_ds.get_obj_pc(
-                        model_id=sample["obj_id"][0].item(),
-                        pc_size=descriptor.obj_point_size * 3,
-                    ).to(device)
-                    gt_R, gt_t = (
-                        sample["rotation"][0].to(device),
-                        sample["translation"][0].to(device),
-                    )
 
                     (
-                        template_point_feat,
+                        obj_templates_feat,
                         obj_templates_average_feat,
-                        scaled_template_point_feat,
                         scaled_obj_templates_feat,
                         scaled_obj_templates_average_feat,
-                        patched_max_size,
-                    ) = extract_combined_point_features(
-                        image, masks, xyzs, gt_R, gt_t, obj_pc, descriptor
+                    ) = extract_features(
+                        image, masks, descriptor, inplane_rotation=False
                     )
 
+                    obj_templates_feats.append(obj_templates_feat)
                     obj_templates_average_feats.append(obj_templates_average_feat)
                     scaled_obj_templates_feats.append(scaled_obj_templates_feat)
                     scaled_obj_templates_average_feats.append(
                         scaled_obj_templates_average_feat
                     )
-                    obj_patched_max_size.append(patched_max_size)
+                obj_templates_feats = torch.stack(obj_templates_feats)
                 obj_templates_average_feats = torch.stack(obj_templates_average_feats)
 
                 scaled_obj_templates_feats = torch.stack(scaled_obj_templates_feats)
                 scaled_obj_templates_average_feats = torch.stack(
                     scaled_obj_templates_average_feats
                 )
-                obj_patched_max_size = torch.stack(obj_patched_max_size)
                 sample = None
 
                 # saving the object's templates features
@@ -187,7 +176,6 @@ def run_pipeline(device):
                 template_dic["scaled_obj_templates_average_feats"] = (
                     scaled_obj_templates_average_feats
                 )
-                template_dic["obj_patched_max_size"] = obj_patched_max_size
 
                 torch.save(template_dic, template_path)
 

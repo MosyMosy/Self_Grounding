@@ -71,26 +71,6 @@ class Descriptor_Base:
 
         self.name = f"Dino_{model_type}_obj_point_size_{self.obj_point_size}_num_temp_{self.num_templates_per_obj}"
 
-    def encode_image_old(self, image: torch.Tensor):
-        if image.shape[-1] != self.input_size or image.shape[-2] != self.input_size:
-            # image = transforms.CenterCrop(540)(image)
-            image_sized = torch.nn.functional.interpolate(
-                image,
-                size=self.input_size,
-                mode="bilinear",
-                align_corners=False,
-            )
-        else:
-            image_sized = image
-
-        with torch.no_grad():
-            features = self.model(image_sized, is_training=True)
-        features_patch = features["x_norm_patchtokens"].permute(0, 2, 1)
-        features_patch = features_patch.view(
-            -1, self.output_channels, *self.output_spatial_size
-        )
-        return features_patch, features["x_norm_clstoken"]
-
     def encode_image_base(self, image: torch.Tensor, scaled: bool = False):
         raise NotImplementedError
 
@@ -98,8 +78,8 @@ class Descriptor_Base:
         self, image: torch.Tensor, inplane_rotation=False, scaled=False
     ):
         with torch.no_grad():
+            B_in = image.shape[0]
             if inplane_rotation:
-                B = image.shape[0]
                 # Concatenate the original and rotated images
                 image = torch.cat(
                     [
@@ -110,34 +90,35 @@ class Descriptor_Base:
                     ],
                     dim=0,
                 )
-
                 features = self.encode_image_base(image, scaled=scaled)
+                features = features.flatten(0, 1)
+                B_feat = features.shape[0]
                 features = features.permute(0, 2, 1).view(
-                    B * 4,
+                    B_feat * 4,
                     self.output_channels,
                     *self.scaled_output_spacial_size,
                 )
                 features = (
-                    features[:B]
+                    features[:B_feat]
                     + torch.rot90(
-                        features[1 * B : 2 * B],
+                        features[1 * B_feat : 2 * B_feat],
                         k=3,
                         dims=[2, 3],
                     )
                     + torch.rot90(
-                        features[2 * B : 3 * B],
+                        features[2 * B_feat : 3 * B_feat],
                         k=2,
                         dims=[2, 3],
                     )
                     + torch.rot90(
-                        features[3 * B : 4 * B],
+                        features[3 * B_feat : 4 * B_feat],
                         k=1,
                         dims=[2, 3],
                     )
                 ) / 4
-                features /= torch.norm(features, dim=1, keepdim=True)
                 C = features.shape[1]
-                features = features.permute(0, 2, 3, 1).view(B, -1, C)
+                features = features.permute(0, 2, 3, 1).view(B_feat, -1, C)
+                features = features.view(B_in, B_feat // B_in, -1, C).mean(dim=1)
             else:
                 features = self.encode_image_base(image, scaled=scaled)
         return features
@@ -155,8 +136,8 @@ class Descriptor_Base:
         features = self.encode_image_with_rotation(
             image_sized, inplane_rotation=inplane_rotation
         )
-        features = features.permute(0, 2, 1)
-        features = features.view(-1, self.output_channels, *self.output_spatial_size)
+        features = features.permute(0, 1, 3, 2)
+        features = features.view(*features.shape[:3], *self.output_spatial_size)
         if mask is not None:
             masks_patched = (
                 torch.functional.F.interpolate(
@@ -166,7 +147,7 @@ class Descriptor_Base:
                 )
                 > 0
             )
-            features_average = (features * masks_patched).sum(dim=(2, 3)) / (
+            features_average = (features * masks_patched.unsqueeze(1)).sum(dim=(3, 4)) / (
                 masks_patched.sum() + 1e-8
             )
             return features, features_average, masks_patched
@@ -195,13 +176,12 @@ class Descriptor_Base:
             test_image_cropped, inplane_rotation=inplane_rotation, scaled=True
         )
         test_image_cropped_embedding = test_image_cropped_embedding.permute(
-            0, 2, 1
+            0, 1, 3, 2
         ).view(
-            B,
-            test_image_cropped_embedding.shape[-1],
+            *test_image_cropped_embedding.shape[:3],
             *self.scaled_output_spacial_size,
         )
-
+        
         masks_cropped_patched = (
             torch.functional.F.interpolate(
                 masks_cropped.float(),
@@ -211,10 +191,7 @@ class Descriptor_Base:
             > 0
         )
 
-        test_image_cropped_embedding /= torch.norm(
-            test_image_cropped_embedding, dim=1, keepdim=True
-        )
-        test_image_cropped_embedding *= masks_cropped_patched
+        test_image_cropped_embedding *= masks_cropped_patched.unsqueeze(1)
         test_image_cropped_embedding = test_image_cropped_embedding.permute(0, 2, 3, 1)
 
         # Average the embeddings

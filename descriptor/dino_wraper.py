@@ -11,9 +11,6 @@ from descriptor.descriptor_base import Descriptor_Base
 import warnings
 
 import torch
-from segment_anything import SamPredictor, sam_model_registry
-
-from segmentation.base_segmentation import Base_Segmentation
 
 
 depths = {
@@ -98,6 +95,9 @@ class Dino_Descriptors(Dino_Wraper):
             image,
             layer_idx=self.depth - 1,
             register_size=self.model.num_register_tokens,
-        )["token"]
-        features /= torch.norm(features, dim=-1, keepdim=True)
+        )
+        features = torch.stack(
+            [features["query"], features["key"], features["value"], features["token"]],
+            dim=1,
+        )
         return features

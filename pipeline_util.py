@@ -56,3 +56,99 @@ def seed_all(seed):
         torch.cuda.manual_seed_all(seed)  # For multi-GPU setups
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
+
+
+def extract_features(image, masks, descriptor, inplane_rotation=False):
+    image_sized = descriptor.cropper(image)
+    masks_sized = descriptor.cropper(masks)
+
+    B = image_sized.shape[0]
+    # Extract embeddings and process normal features
+
+    # Extract scaled features
+    (
+        normal_embeddings,
+        normal_embeddings_averages,
+        scaled_embeddings,
+        scaled_embeddings_average,
+    ) = ([], [], [], [])
+    for i in range(masks_sized.shape[0]):
+        normal_embedding, normal_embedding_average, patched_mask = (
+            descriptor.encode_image(
+                image_sized[i].unsqueeze(0), mask=masks_sized[i].unsqueeze(0)
+            )
+        )
+        normal_embedding, normal_embedding_average = (
+            normal_embedding[0],
+            normal_embedding_average[0],
+        )
+
+        bbox = get_bounding_boxes_batch(masks_sized[i].unsqueeze(0).squeeze(1))
+        scaled_embedding, _, scaled_embedding_average = (
+            descriptor.encode_image_scaled_masked(
+                image_sized[i],
+                masks_sized[i].unsqueeze(0),
+                bbox,
+                inplane_rotation=inplane_rotation,
+            )
+        )
+
+        normal_embeddings.append(normal_embedding)
+        normal_embeddings_averages.append(normal_embedding_average)
+        scaled_embeddings.append(scaled_embedding.squeeze(0))
+        scaled_embeddings_average.append(scaled_embedding_average.squeeze(0))
+
+    normal_embeddings = torch.stack(normal_embeddings)
+    normal_embeddings_averages = torch.stack(normal_embeddings_averages)
+    scaled_embeddings = torch.stack(scaled_embeddings).permute(0, 3, 1, 2)
+    scaled_embeddings_average = torch.stack(scaled_embeddings_average)
+
+    return (
+        normal_embeddings,
+        normal_embeddings_averages,
+        scaled_embeddings,
+        scaled_embeddings_average,
+    )
+
+
+def get_bounding_box(mask):
+    """
+    Get the bounding box coordinates of a single segmentation mask.
+
+    Parameters:
+    mask (torch.Tensor): A binary segmentation mask of shape (H, W)
+
+    Returns:
+    bbox (tuple): Bounding box coordinates (x_min, y_min, x_max, y_max)
+    """
+    # Find the indices of non-zero elements
+    non_zero_indices = torch.nonzero(mask)
+
+    if non_zero_indices.numel() == 0:
+        return torch.tensor(
+            [0, 0, 2, 2], device=mask.device
+        )  # If the mask is empty, return a zero-size bounding box
+
+    # Get the min and max coordinates
+    y_min, x_min = torch.min(non_zero_indices, dim=0)[0]
+    y_max, x_max = torch.max(non_zero_indices, dim=0)[0]
+
+    return torch.stack([x_min, y_min, x_max, y_max])
+
+
+def get_bounding_boxes_batch(masks):
+    """
+    Get bounding box coordinates for a batch of segmentation masks.
+
+    Parameters:
+    masks (torch.Tensor): A batch of binary segmentation masks of shape (B, H, W)
+
+    Returns:
+    bboxes: tensor of bounding box coordinates for each mask
+    """
+    bboxes = []
+    for mask in masks:
+        bbox = get_bounding_box(mask)
+        bboxes.append(bbox)
+
+    return torch.stack(bboxes)
