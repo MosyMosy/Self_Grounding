@@ -58,14 +58,7 @@ descriptor_settings_dino_descriptor = {
     "class": Dino_Descriptors,
     "model_type": "vitl14_reg",
     "obj_point_size": 1024,
-    "num_templates_per_obj": 120,
-}
-
-descriptor_settings_sam = {
-    "class": Sam_Wraper,
-    "model_type": "vit_h",
-    "obj_point_size": 1024,
-    "num_templates_per_obj": 32,
+    "num_templates_per_obj": 16,
 }
 
 
@@ -108,9 +101,9 @@ def run_pipeline(device):
             obj_templates_feats = template_dic["obj_templates_feats"]
             obj_templates_average_feats = template_dic["obj_templates_average_feats"]
 
-            scaled_obj_templates_feats = template_dic["scaled_obj_templates_feats"]
-            scaled_obj_templates_average_feats = template_dic[
-                "scaled_obj_templates_average_feats"
+            obj_templates_feats_scaled = template_dic["obj_templates_feats_scaled"]
+            obj_templates_average_feats_scaled = template_dic[
+                "obj_templates_average_feats_scaled"
             ]
         else:
             with pipeline_step(
@@ -133,8 +126,8 @@ def run_pipeline(device):
 
                 obj_templates_feats = []
                 obj_templates_average_feats = []
-                scaled_obj_templates_feats = []
-                scaled_obj_templates_average_feats = []
+                obj_templates_feats_scaled = []
+                obj_templates_average_feats_scaled = []
                 for sample in tqdm(
                     obj_template_dl, desc="Adding features to the point cloud"
                 ):
@@ -147,37 +140,101 @@ def run_pipeline(device):
                         scaled_obj_templates_feat,
                         scaled_obj_templates_average_feat,
                     ) = extract_features(
-                        image, masks, descriptor, inplane_rotation=False
+                        image, masks, descriptor, inplane_rotation=False, batch_size=1
                     )
 
                     obj_templates_feats.append(obj_templates_feat)
                     obj_templates_average_feats.append(obj_templates_average_feat)
-                    scaled_obj_templates_feats.append(scaled_obj_templates_feat)
-                    scaled_obj_templates_average_feats.append(
+                    obj_templates_feats_scaled.append(scaled_obj_templates_feat)
+                    obj_templates_average_feats_scaled.append(
                         scaled_obj_templates_average_feat
                     )
                 obj_templates_feats = torch.stack(obj_templates_feats)
                 obj_templates_average_feats = torch.stack(obj_templates_average_feats)
 
-                scaled_obj_templates_feats = torch.stack(scaled_obj_templates_feats)
-                scaled_obj_templates_average_feats = torch.stack(
-                    scaled_obj_templates_average_feats
+                obj_templates_feats_scaled = torch.stack(obj_templates_feats_scaled)
+                obj_templates_average_feats_scaled = torch.stack(
+                    obj_templates_average_feats_scaled
                 )
                 sample = None
 
                 # saving the object's templates features
                 pipeline_step.print_full_width("Saving the object's templates features")
                 os.makedirs(os.path.dirname(template_path), exist_ok=True)
+
                 template_dic = {}
+                template_dic["obj_templates_feats"] = obj_templates_feats
                 template_dic["obj_templates_average_feats"] = (
                     obj_templates_average_feats
                 )
-                template_dic["scaled_obj_templates_feats"] = scaled_obj_templates_feats
-                template_dic["scaled_obj_templates_average_feats"] = (
-                    scaled_obj_templates_average_feats
+                template_dic["obj_templates_feats_scaled"] = obj_templates_feats_scaled
+                template_dic["obj_templates_average_feats_scaled"] = (
+                    obj_templates_average_feats_scaled
                 )
 
                 torch.save(template_dic, template_path)
+
+    with pipeline_step("Online steps"):
+        reference_query = obj_templates_average_feats[:, :, 0, :]
+
+        for i, test_sample in tqdm(
+            enumerate(test_dl), desc="Testing", total=len(test_ds)
+        ):
+            test_image = test_sample["image"].to(device)
+
+            H_org, W_org = test_image.shape[-2:]
+
+            test_embedding = descriptor.encode_image(test_image)[0]
+            test_embedding_key = test_embedding[1, :, :, :]
+            C, _, _ = test_embedding_key.shape
+
+            reference_query_mean = reference_query.mean(dim=1)
+            test_embedding_key_flatten = test_embedding_key.flatten(1, 2)
+
+            reference_query_mean /= torch.norm(
+                reference_query_mean, dim=-1, keepdim=True
+            )
+            test_embedding_key_flatten /= torch.norm(
+                test_embedding_key_flatten, dim=-1, keepdim=True
+            )
+
+            Q_ref_key_scene_sim = reference_query_mean @ test_embedding_key_flatten
+
+            Q_ref_key_scene_sim = (Q_ref_key_scene_sim - Q_ref_key_scene_sim.min()) / (
+                Q_ref_key_scene_sim.max() - Q_ref_key_scene_sim.min()
+            )
+
+            foreground_prompt_map = Q_ref_key_scene_sim.view(
+                Q_ref_key_scene_sim.shape[0], *descriptor.output_spatial_size
+            )
+            foreground_prompt_map = foreground_prompt_map > 0.8
+            foreground_prompt_map = foreground_prompt_map[0].bool()
+
+            with pipeline_step("Visualizing the results", speak=False):
+                result = descriptor.inv_trans(test_image)
+
+                foreground_prompt_map = (
+                    foreground_prompt_map.unsqueeze(-1).permute(2, 0, 1).float()
+                )
+                foreground_prompt_map = descriptor.to_org_size(
+                    foreground_prompt_map, H_org, W_org
+                )
+                foreground_prompt_map[foreground_prompt_map == 0] = 0.2
+                result *= foreground_prompt_map
+                result = descriptor.cropper.reverse(result, test_sample["org_size"][0])
+                vutils.save_image(
+                    result, f"temp/main/{descriptor.name}_{i}_positives.png"
+                )
+
+            if i == 10:
+                break
+
+        # miou_list = np.array(miou_list)
+        # # sort it
+        # miou_list = miou_list[miou_list[:, 2].argsort()]
+        # np.savetxt("temp/main/miou_list.txt", miou_list, fmt="%f")
+        # mean_iou = miou_list[:, 2].mean()
+        # print(f"Mean iou: {mean_iou}")
 
 
 if __name__ == "__main__":

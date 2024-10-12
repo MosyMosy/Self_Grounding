@@ -147,15 +147,14 @@ class Descriptor_Base:
                 )
                 > 0
             )
-            features_average = (features * masks_patched.unsqueeze(1)).sum(dim=(3, 4)) / (
-                masks_patched.sum() + 1e-8
-            )
+            features_average = (features * masks_patched.unsqueeze(1)).sum(
+                dim=(3, 4)
+            ) / (masks_patched.sum() + 1e-8)
             return features, features_average, masks_patched
         else:
             return features
 
     def encode_image_scaled_masked(self, image, mask, bbox, inplane_rotation=False):
-        assert len(image.shape) == 3, "image shouldn't be batched"
         assert len(mask.shape) == 4, "mask should be batched"
         assert mask.shape[1] == 1, "mask should be binary"
         assert (
@@ -166,22 +165,19 @@ class Descriptor_Base:
         ), "mask and bbox should have same batch size"
 
         B = mask.shape[0]
-        test_image_cropped = self.scaled_cropper(
-            image.unsqueeze(0).repeat(B, 1, 1, 1), bbox
-        )
+        test_image_cropped = self.scaled_cropper(image, bbox)
         masks_cropped = self.scaled_cropper(mask.float(), bbox)
 
         # test_image_cropped = test_image_cropped * gt_masks_cropped # This is not good
         test_image_cropped_embedding = self.encode_image_with_rotation(
             test_image_cropped, inplane_rotation=inplane_rotation, scaled=True
         )
-        test_image_cropped_embedding = test_image_cropped_embedding.permute(
-            0, 1, 3, 2
-        ).view(
+        test_image_cropped_embedding = test_image_cropped_embedding.permute(0, 1, 3, 2)
+        test_image_cropped_embedding = test_image_cropped_embedding.view(
             *test_image_cropped_embedding.shape[:3],
             *self.scaled_output_spacial_size,
         )
-        
+
         masks_cropped_patched = (
             torch.functional.F.interpolate(
                 masks_cropped.float(),
@@ -192,17 +188,15 @@ class Descriptor_Base:
         )
 
         test_image_cropped_embedding *= masks_cropped_patched.unsqueeze(1)
-        test_image_cropped_embedding = test_image_cropped_embedding.permute(0, 2, 3, 1)
+        # test_image_cropped_embedding = test_image_cropped_embedding.permute(
+        #     0, 1, 3, 4, 2
+        # )
 
         # Average the embeddings
-        masks_patched_lengths = masks_cropped_patched.view(B, -1).sum(dim=-1)
-        C = test_image_cropped_embedding.shape[-1]
-        test_embedding_masked_mean = test_image_cropped_embedding.view(B, -1, C).sum(
-            dim=1
+        masks_patched_lengths = masks_cropped_patched.sum(dim=(2, 3))
+        test_embedding_masked_mean = test_image_cropped_embedding.sum(
+            dim=(3, 4)
         ) / masks_patched_lengths.unsqueeze(-1)
-        test_embedding_masked_mean /= torch.norm(
-            test_embedding_masked_mean, dim=-1, keepdim=True
-        )
 
         return (
             test_image_cropped_embedding,

@@ -3,6 +3,7 @@ import os
 from time import time
 import random
 import numpy as np
+from torch.utils.data import DataLoader, TensorDataset
 
 
 class pipeline_step:
@@ -58,36 +59,30 @@ def seed_all(seed):
         torch.backends.cudnn.benchmark = False
 
 
-def extract_features(image, masks, descriptor, inplane_rotation=False):
+def extract_features(image, masks, descriptor, inplane_rotation=False, batch_size=2):
     image_sized = descriptor.cropper(image)
     masks_sized = descriptor.cropper(masks)
 
-    B = image_sized.shape[0]
-    # Extract embeddings and process normal features
-
-    # Extract scaled features
+    image_mask_ds = TensorDataset(image_sized, masks_sized)
+    image_mask_dl = DataLoader(image_mask_ds, batch_size=batch_size, shuffle=False)
     (
         normal_embeddings,
         normal_embeddings_averages,
         scaled_embeddings,
         scaled_embeddings_average,
     ) = ([], [], [], [])
-    for i in range(masks_sized.shape[0]):
+    for images_batched, mask_batched in image_mask_dl:
         normal_embedding, normal_embedding_average, patched_mask = (
             descriptor.encode_image(
-                image_sized[i].unsqueeze(0), mask=masks_sized[i].unsqueeze(0)
+                images_batched, mask=mask_batched
             )
         )
-        normal_embedding, normal_embedding_average = (
-            normal_embedding[0],
-            normal_embedding_average[0],
-        )
 
-        bbox = get_bounding_boxes_batch(masks_sized[i].unsqueeze(0).squeeze(1))
+        bbox = get_bounding_boxes_batch(mask_batched.squeeze(1))
         scaled_embedding, _, scaled_embedding_average = (
             descriptor.encode_image_scaled_masked(
-                image_sized[i],
-                masks_sized[i].unsqueeze(0),
+                images_batched,
+                mask_batched,
                 bbox,
                 inplane_rotation=inplane_rotation,
             )
@@ -95,13 +90,13 @@ def extract_features(image, masks, descriptor, inplane_rotation=False):
 
         normal_embeddings.append(normal_embedding)
         normal_embeddings_averages.append(normal_embedding_average)
-        scaled_embeddings.append(scaled_embedding.squeeze(0))
-        scaled_embeddings_average.append(scaled_embedding_average.squeeze(0))
+        scaled_embeddings.append(scaled_embedding)
+        scaled_embeddings_average.append(scaled_embedding_average)
 
-    normal_embeddings = torch.stack(normal_embeddings)
-    normal_embeddings_averages = torch.stack(normal_embeddings_averages)
-    scaled_embeddings = torch.stack(scaled_embeddings).permute(0, 3, 1, 2)
-    scaled_embeddings_average = torch.stack(scaled_embeddings_average)
+    normal_embeddings = torch.cat(normal_embeddings)
+    normal_embeddings_averages = torch.cat(normal_embeddings_averages)
+    scaled_embeddings = torch.cat(scaled_embeddings)
+    scaled_embeddings_average = torch.cat(scaled_embeddings_average)
 
     return (
         normal_embeddings,
