@@ -92,30 +92,42 @@ class CropResizePad:
 
 
 class CropResizePad_v2:
-    def __init__(self, target_size):
+    def __init__(self, target_size, square_bbox=False):
         if isinstance(target_size, int):
             target_size = (target_size, target_size)
         self.target_size = target_size
         self.target_ratio = self.target_size[1] / self.target_size[0]
         self.target_h, self.target_w = target_size
         self.target_max = max(self.target_h, self.target_w)
+        self.square_bbox = square_bbox
 
     def __call__(self, images, boxes=None):
-        num_images = images.size(0)
+        B, _, h, w = images.shape
 
         if boxes is None:
             # Create boxes that span the entire image
-            num_images = images.shape[0]
-            _, _, h, w = images.shape
-            boxes = torch.tensor([[0, 0, w, h]] * num_images)
+            boxes = torch.tensor([[0, 0, w, h]] * B)
 
         # Calculate box sizes and scale factors
         box_sizes = boxes[:, 2:] - boxes[:, :2]
-        scale_factors = self.target_max / torch.max(box_sizes, dim=-1)[0]
+        box_sizes_max = torch.max(box_sizes, dim=-1)[0]
+        scale_factors = self.target_max / box_sizes_max
+
+        if self.square_bbox:
+            # Make the bounding boxes square
+            boxes[:, 2] = boxes[:, 0] + box_sizes_max
+            boxes[:, 3] = boxes[:, 1] + box_sizes_max
+            
+            box_width = boxes[:, 2] - boxes[:, 0]
+            box_height = boxes[:, 3] - boxes[:, 1]
+            extra_width = box_width > w
+            extra_height = box_height > h
+            boxes[extra_width, 2] = w
+            boxes[extra_height, 3] = h
 
         cropped_images = []
         padding_info = []
-        for i in range(num_images):
+        for i in range(B):
             image, box = images[i], boxes[i]
             cropped_image = image[
                 :, int(box[1]) : int(box[3]), int(box[0]) : int(box[2])

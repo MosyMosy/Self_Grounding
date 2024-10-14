@@ -67,7 +67,7 @@ class Descriptor_Base:
         )
 
         self.cropper = CropResizePad_v2(self.input_size)
-        self.scaled_cropper = CropResizePad_v2(self.scaled_input_size)
+        self.scaled_cropper = CropResizePad_v2(self.scaled_input_size, square_bbox=True)
 
         self.name = f"Dino_{model_type}_obj_point_size_{self.obj_point_size}_num_temp_{self.num_templates_per_obj}"
 
@@ -123,8 +123,10 @@ class Descriptor_Base:
                 features = self.encode_image_base(image, scaled=scaled)
         return features
 
-    def encode_image(self, image: torch.Tensor, inplane_rotation=False, mask=None):
-        if (
+    def encode_image(
+        self, image: torch.Tensor, inplane_rotation=False, mask=None, is_scaled=False
+    ):
+        if (not is_scaled) and (
             image.shape[-1] != self.input_size[-1]
             or image.shape[-2] != self.input_size[-2]
         ):
@@ -137,15 +139,18 @@ class Descriptor_Base:
             image_sized, inplane_rotation=inplane_rotation
         )
         features = features.permute(0, 1, 3, 2)
-        features = features.view(*features.shape[:3], *self.output_spatial_size)
+        spatial_size = (
+            self.scaled_output_spacial_size if is_scaled else self.output_spatial_size
+        )
+        features = features.view(*features.shape[:3], *spatial_size)
         if mask is not None:
             masks_patched = (
                 torch.functional.F.interpolate(
                     mask.float(),
-                    size=self.output_spatial_size,
+                    size=spatial_size,
                     mode="bilinear",
                 )
-                > 0
+                > 0.5
             )
             features_average = (features * masks_patched.unsqueeze(1)).sum(
                 dim=(3, 4)
@@ -154,55 +159,55 @@ class Descriptor_Base:
         else:
             return features
 
-    def encode_image_scaled_masked(self, image, mask, bbox, inplane_rotation=False):
-        assert len(mask.shape) == 4, "mask should be batched"
-        assert mask.shape[1] == 1, "mask should be binary"
-        assert (
-            mask.shape[0] == bbox.shape[0]
-        ), "mask and bbox should have same batch size"
-        assert (
-            mask.shape[0] == bbox.shape[0]
-        ), "mask and bbox should have same batch size"
+    # def encode_image_scaled_masked(self, image, mask, bbox, inplane_rotation=False):
+    #     assert len(mask.shape) == 4, "mask should be batched"
+    #     assert mask.shape[1] == 1, "mask should be binary"
+    #     assert (
+    #         mask.shape[0] == bbox.shape[0]
+    #     ), "mask and bbox should have same batch size"
+    #     assert (
+    #         mask.shape[0] == bbox.shape[0]
+    #     ), "mask and bbox should have same batch size"
 
-        B = mask.shape[0]
-        test_image_cropped = self.scaled_cropper(image, bbox)
-        masks_cropped = self.scaled_cropper(mask.float(), bbox)
+    #     B = mask.shape[0]
+    #     test_image_cropped = self.scaled_cropper(image, bbox)
+    #     masks_cropped = self.scaled_cropper(mask.float(), bbox)
 
-        # test_image_cropped = test_image_cropped * gt_masks_cropped # This is not good
-        test_image_cropped_embedding = self.encode_image_with_rotation(
-            test_image_cropped, inplane_rotation=inplane_rotation, scaled=True
-        )
-        test_image_cropped_embedding = test_image_cropped_embedding.permute(0, 1, 3, 2)
-        test_image_cropped_embedding = test_image_cropped_embedding.view(
-            *test_image_cropped_embedding.shape[:3],
-            *self.scaled_output_spacial_size,
-        )
+    #     # test_image_cropped = test_image_cropped * gt_masks_cropped # This is not good
+    #     test_image_cropped_embedding = self.encode_image_with_rotation(
+    #         test_image_cropped, inplane_rotation=inplane_rotation, scaled=True
+    #     )
+    #     test_image_cropped_embedding = test_image_cropped_embedding.permute(0, 1, 3, 2)
+    #     test_image_cropped_embedding = test_image_cropped_embedding.view(
+    #         *test_image_cropped_embedding.shape[:3],
+    #         *self.scaled_output_spacial_size,
+    #     )
 
-        masks_cropped_patched = (
-            torch.functional.F.interpolate(
-                masks_cropped.float(),
-                size=self.scaled_output_spacial_size,
-                mode="bilinear",
-            )
-            > 0
-        )
+    #     masks_cropped_patched = (
+    #         torch.functional.F.interpolate(
+    #             masks_cropped.float(),
+    #             size=self.scaled_output_spacial_size,
+    #             mode="bilinear",
+    #         )
+    #         > 0
+    #     )
 
-        test_image_cropped_embedding *= masks_cropped_patched.unsqueeze(1)
-        # test_image_cropped_embedding = test_image_cropped_embedding.permute(
-        #     0, 1, 3, 4, 2
-        # )
+    #     test_image_cropped_embedding *= masks_cropped_patched.unsqueeze(1)
+    #     # test_image_cropped_embedding = test_image_cropped_embedding.permute(
+    #     #     0, 1, 3, 4, 2
+    #     # )
 
-        # Average the embeddings
-        masks_patched_lengths = masks_cropped_patched.sum(dim=(2, 3))
-        test_embedding_masked_mean = test_image_cropped_embedding.sum(
-            dim=(3, 4)
-        ) / masks_patched_lengths.unsqueeze(-1)
+    #     # Average the embeddings
+    #     masks_patched_lengths = masks_cropped_patched.sum(dim=(2, 3))
+    #     test_embedding_masked_mean = test_image_cropped_embedding.sum(
+    #         dim=(3, 4)
+    #     ) / masks_patched_lengths.unsqueeze(-1)
 
-        return (
-            test_image_cropped_embedding,
-            masks_cropped_patched,
-            test_embedding_masked_mean,
-        )
+    #     return (
+    #         test_image_cropped_embedding,
+    #         masks_cropped_patched,
+    #         test_embedding_masked_mean,
+    #     )
 
     def to_org_size(self, prompt_map, H_org, W_org):
         prompt_map = torch.nn.functional.interpolate(

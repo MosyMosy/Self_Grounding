@@ -70,39 +70,48 @@ def extract_features(image, masks, descriptor, inplane_rotation=False, batch_siz
         normal_embeddings_averages,
         scaled_embeddings,
         scaled_embeddings_average,
-    ) = ([], [], [], [])
+        scaled_images,
+        scaled_masks,
+    ) = ([], [], [], [], [], [])
     for images_batched, mask_batched in image_mask_dl:
         normal_embedding, normal_embedding_average, patched_mask = (
             descriptor.encode_image(
-                images_batched, mask=mask_batched
+                images_batched, mask=mask_batched, inplane_rotation=False
             )
         )
 
         bbox = get_bounding_boxes_batch(mask_batched.squeeze(1))
-        scaled_embedding, _, scaled_embedding_average = (
-            descriptor.encode_image_scaled_masked(
-                images_batched,
-                mask_batched,
-                bbox,
-                inplane_rotation=inplane_rotation,
-            )
+        images_batched_scaled = descriptor.scaled_cropper(images_batched, bbox)
+        mask_batched_scaled = descriptor.scaled_cropper(mask_batched.float(), bbox)
+
+        scaled_embedding, scaled_embedding_average, _ = descriptor.encode_image(
+            images_batched_scaled,
+            mask=mask_batched_scaled,
+            inplane_rotation=inplane_rotation,
+            is_scaled=True,
         )
 
         normal_embeddings.append(normal_embedding)
         normal_embeddings_averages.append(normal_embedding_average)
         scaled_embeddings.append(scaled_embedding)
         scaled_embeddings_average.append(scaled_embedding_average)
+        scaled_images.append(images_batched_scaled)
+        scaled_masks.append(mask_batched_scaled)
 
     normal_embeddings = torch.cat(normal_embeddings)
     normal_embeddings_averages = torch.cat(normal_embeddings_averages)
     scaled_embeddings = torch.cat(scaled_embeddings)
     scaled_embeddings_average = torch.cat(scaled_embeddings_average)
+    scaled_images = torch.cat(scaled_images)
+    scaled_masks = torch.cat(scaled_masks)
 
     return (
         normal_embeddings,
         normal_embeddings_averages,
         scaled_embeddings,
         scaled_embeddings_average,
+        scaled_images,
+        scaled_masks,
     )
 
 
