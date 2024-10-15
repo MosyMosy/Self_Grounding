@@ -95,9 +95,7 @@ def run_pipeline(device):
         )
         test_ds.prepare_metadata()
         test_dl = test_ds.get_dataloader(batch_size=1, num_workers=4, shuffle=True)
-        template_path = (
-            f"offline_data/lab_attention/{descriptor.name}/{dataset_name}/templates.pth"
-        )
+        template_path = f"offline_data/{descriptor.name}/{dataset_name}/templates.pth"
         rgb_path = os.path.join(os.path.dirname(template_path), "rgb")
         mask_path = os.path.join(os.path.dirname(template_path), "mask")
 
@@ -105,13 +103,15 @@ def run_pipeline(device):
         if os.path.exists(template_path):
             pipeline_step.print_full_width("Loading the object's templates features")
             template_dic = torch.load(template_path)
-            # obj_templates_feats = template_dic["obj_templates_feats"]
-            obj_templates_average_feats = template_dic["obj_templates_average_feats"]
+            # # obj_templates_feats = template_dic["obj_templates_feats"]
+            # obj_templates_average_feats = template_dic["obj_templates_average_feats"]
 
-            obj_templates_feats_scaled = template_dic["obj_templates_feats_scaled"]
-            obj_templates_average_feats_scaled = template_dic[
-                "obj_templates_average_feats_scaled"
-            ]
+            # obj_templates_feats_scaled = template_dic["obj_templates_feats_scaled"]
+            # obj_templates_average_feats_scaled = template_dic[
+            #     "obj_templates_average_feats_scaled"
+            # ]
+
+            objs_average_feats_scaled = template_dic["objs_average_feats_scaled"]
         else:
             with pipeline_step(
                 "Adding object's templates features to the object's point cloud"
@@ -139,6 +139,7 @@ def run_pipeline(device):
                 obj_templates_average_feats = []
                 obj_templates_feats_scaled = []
                 obj_templates_average_feats_scaled = []
+                objs_average_feats_scaled = []
                 for i, sample in enumerate(
                     tqdm(obj_template_dl, desc="Adding features to the point cloud")
                 ):
@@ -172,19 +173,23 @@ def run_pipeline(device):
                             ),
                         )
 
-                    obj_templates_feats.append(obj_templates_feat)
-                    obj_templates_average_feats.append(obj_templates_average_feat)
-                    obj_templates_feats_scaled.append(scaled_obj_templates_feat)
-                    obj_templates_average_feats_scaled.append(
-                        scaled_obj_templates_average_feat
+                    # obj_templates_feats.append(obj_templates_feat)
+                    # obj_templates_average_feats.append(obj_templates_average_feat)
+                    # obj_templates_feats_scaled.append(scaled_obj_templates_feat)
+                    # obj_templates_average_feats_scaled.append(
+                    #     scaled_obj_templates_average_feat
+                    # )
+                    objs_average_feats_scaled.append(
+                        scaled_obj_templates_average_feat.mean(dim=0)
                     )
-                obj_templates_feats = torch.stack(obj_templates_feats)
-                obj_templates_average_feats = torch.stack(obj_templates_average_feats)
+                # obj_templates_feats = torch.stack(obj_templates_feats)
+                # obj_templates_average_feats = torch.stack(obj_templates_average_feats)
 
-                obj_templates_feats_scaled = torch.stack(obj_templates_feats_scaled)
-                obj_templates_average_feats_scaled = torch.stack(
-                    obj_templates_average_feats_scaled
-                )
+                # obj_templates_feats_scaled = torch.stack(obj_templates_feats_scaled)
+                # obj_templates_average_feats_scaled = torch.stack(
+                #     obj_templates_average_feats_scaled
+                # )
+                objs_average_feats_scaled = torch.stack(objs_average_feats_scaled)
                 sample = None
 
                 # saving the object's templates features
@@ -192,67 +197,117 @@ def run_pipeline(device):
 
                 template_dic = {}
                 # template_dic["obj_templates_feats"] = obj_templates_feats
-                template_dic["obj_templates_average_feats"] = (
-                    obj_templates_average_feats
-                )
-                template_dic["obj_templates_feats_scaled"] = obj_templates_feats_scaled
-                template_dic["obj_templates_average_feats_scaled"] = (
-                    obj_templates_average_feats_scaled
-                )
+                # template_dic["obj_templates_average_feats"] = (
+                #     obj_templates_average_feats
+                # )
+                # template_dic["obj_templates_feats_scaled"] = obj_templates_feats_scaled
+                # template_dic["obj_templates_average_feats_scaled"] = (
+                #     obj_templates_average_feats_scaled
+                # )
+                template_dic["objs_average_feats_scaled"] = objs_average_feats_scaled
 
                 torch.save(template_dic, template_path)
 
     with pipeline_step("Online steps"):
-        obj_id = 10
+        obj_id = 0
         obj_template_id = 6
 
-        reference_query = obj_templates_average_feats_scaled[obj_id, :, 0, :].mean(
-            dim=0
-        )
-        reference_key = obj_templates_feats_scaled[obj_id, obj_template_id, 2, :, :, :]
+        reference_query = objs_average_feats_scaled[obj_id, -1, 0, :]
+        reference_token = objs_average_feats_scaled[obj_id, -1, 3, :]
 
         reference_query = reference_query.unsqueeze(0)
-        reference_key = reference_key.flatten(1, 2).permute(1, 0)
+        reference_token = reference_token.unsqueeze(0)
 
-        image_cropped_scaled = Image.open(
-            os.path.join(
-                rgb_path,
-                f"{obj_id}_{obj_template_id}.png",
+        for i, test_sample in tqdm(
+            enumerate(test_dl), desc="Testing", total=len(test_ds)
+        ):
+            test_image = test_sample["image"].to(device)
+
+            H_org, W_org = test_image.shape[-2:]
+
+            test_embedding = descriptor.encode_image(
+                test_image, q_list=objs_average_feats_scaled[0, :, 0, :]
+            )[0][-1]
+            test_embedding_query = (
+                test_embedding[0, :, :, :].flatten(1, 2).permute(1, 0)
             )
-        )
-
-        for head in range(17):
-            head_range_start = head * 64
-            head_range_end = (head + 1) * 64
-            if head < 16:
-                reference_query_head = reference_query[:, head_range_start:head_range_end]
-                reference_key_head = reference_key[:, head_range_start:head_range_end]
-            else:
-                reference_query_head = reference_query
-                reference_key_head = reference_key
-
-            reference_query_head /= reference_query_head.norm(dim=-1, keepdim=True)
-            reference_key_head /= reference_key_head.norm(dim=-1, keepdim=True)
-            attention_weights = reference_query_head @ reference_key_head.t()
-
-            attention_weights = attention_weights.view(-1, 16, 16)
-            attention_weights = torch.nn.functional.interpolate(
-                attention_weights.unsqueeze(0), size=(224, 224)
+            test_embedding_token = (
+                test_embedding[3, :, :, :].flatten(1, 2).permute(1, 0)
             )
-            attention_weights = attention_weights.squeeze(0).squeeze(0).cpu().numpy()
 
-            plt.figure(figsize=(10, 10))
+            for head in range(17):
+                head_range_start = head * 64
+                head_range_end = (head + 1) * 64
+                if head < 16:
+                    reference_query_head = reference_query[
+                        :, head_range_start:head_range_end
+                    ]
+                    test_embedding_query_head = test_embedding_query[
+                        :, head_range_start:head_range_end
+                    ]
 
-            plt.imshow(image_cropped_scaled)
-            plt.imshow(
-                attention_weights, cmap="jet", alpha=0.4
-            )  # Overlay attention map with transparency
-            plt.title("Attention weights")
+                    reference_token_head = reference_token[
+                        :, head_range_start:head_range_end
+                    ]
+                    test_embedding_token_head = test_embedding_token[
+                        :, head_range_start:head_range_end
+                    ]
 
-            plt.savefig(
-                f"temp/lab_attention/query_value/attention_weights{obj_id}_{obj_template_id}_{head}.png"
-            )
-            plt.close()
+                else:
+                    reference_query_head = reference_query
+                    test_embedding_query_head = test_embedding_query
+
+                    reference_token_head = reference_token
+                    test_embedding_token_head = test_embedding_token
+
+                reference_query_head /= reference_query_head.norm(dim=-1, keepdim=True)
+                test_embedding_query_head /= test_embedding_query_head.norm(
+                    dim=-1, keepdim=True
+                )
+                query_sim = test_embedding_query_head @ reference_query_head.t()
+                # query_sim_normal = (query_sim - query_sim.min()) / (
+                #     query_sim.max() - query_sim.min()
+                # )
+                # key_average = (test_embedding_token_head * query_sim_normal).sum(
+                #     dim=0
+                # ) / query_sim_normal.sum()
+                # test_embedding_token_head -= (
+                #     1 - query_sim_normal
+                # ) * key_average.unsqueeze(0)
+
+                reference_token_head /= reference_token_head.norm(dim=-1, keepdim=True)
+                test_embedding_token_head /= test_embedding_token_head.norm(
+                    dim=-1, keepdim=True
+                )
+                fore_sim = test_embedding_token_head @ reference_token_head.t()
+
+                fore_sim = fore_sim.view(-1, *descriptor.output_spatial_size)
+                fore_sim = torch.nn.functional.interpolate(
+                    fore_sim.unsqueeze(0), size=(H_org, W_org)
+                )
+                fore_sim[fore_sim < 0.5] = 0
+                fore_sim = fore_sim.squeeze(0).squeeze(0).cpu().numpy()
+
+                plt.figure(figsize=(10, 10))
+
+                plt.imshow(
+                    descriptor.inv_trans(test_image)
+                    .cpu()
+                    .squeeze(0)
+                    .permute(1, 2, 0)
+                    .numpy()
+                )
+                plt.imshow(
+                    fore_sim, cmap="jet", alpha=0.4
+                )  # Overlay attention map with transparency
+                plt.title("Attention weights")
+
+                plt.savefig(
+                    f"temp/lab_attention_scene/token_token/attention_weights{i}_{obj_id}_{head}.png"
+                )
+                plt.close()
+
+            break
 
 
 if __name__ == "__main__":

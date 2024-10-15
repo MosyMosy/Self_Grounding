@@ -134,9 +134,9 @@ class ViTExtractor:
 
         return _inner_hook
 
-    def _register_hooks(self, layer_idx: int) -> None:
+    def _register_hooks(self, layer_idx: list) -> None:
         for block_idx, block in enumerate(self.model.blocks):
-            if block_idx == layer_idx:
+            if block_idx in layer_idx:
                 self.hook_handlers.append(
                     block.register_forward_hook(self._get_hook_token_atten("token"))
                 )
@@ -158,13 +158,12 @@ class ViTExtractor:
         self.hook_handlers = []
 
     def _extract_features(
-        self, batch: torch.Tensor, layer_idx: int = 11
+        self, batch: torch.Tensor, q_list: torch.Tensor = None, layer_idx: list = [11]
     ) -> List[torch.Tensor]:
-
         B, C, H, W = batch.shape
         self._feats = {"token": [], "atten": [], "key": [], "query": [], "value": []}
         self._register_hooks(layer_idx)
-        _ = self.model(batch)
+        _ = self.model(batch, q_list=q_list)
         self._unregister_hooks()
         self.load_size = (H, W)
 
@@ -173,28 +172,40 @@ class ViTExtractor:
     def extract_descriptors(
         self,
         batch: torch.Tensor,
-        layer_idx: int = 23,
+        q_list: torch.Tensor = None,
+        layer_idx: list = [23],
         register_size=4,
     ) -> torch.Tensor:
-        self._extract_features(batch, layer_idx)
-        self._feats["token"] = self._feats["token"][0][:, 1 + register_size :, :]
+        self._extract_features(batch, q_list, layer_idx)
+        self._feats["token"] = [
+            item[0][:, 1 + register_size :, :] for item in self._feats["token"]
+        ]
         # self._feats["atten"] = self._feats["atten"][0][:, 1 + register_size :, :]
 
-        self._feats["key"] = (
-            self._feats["key"][0]
-            .permute(0, 2, 3, 1)
-            .flatten(start_dim=-2, end_dim=-1)[:, 1 + register_size :, :]
-        )
-        self._feats["query"] = (
-            self._feats["query"][0]
-            .permute(0, 2, 3, 1)
-            .flatten(start_dim=-2, end_dim=-1)[:, 1 + register_size :, :]
-        )
-        self._feats["value"] = (
-            self._feats["value"][0]
-            .permute(0, 2, 3, 1)
-            .flatten(start_dim=-2, end_dim=-1)[:, 1 + register_size :, :]
-        )
+        self._feats["key"] = [
+            item.permute(0, 2, 3, 1).flatten(start_dim=-2, end_dim=-1)[
+                :, 1 + register_size :, :
+            ]
+            for item in self._feats["key"]
+        ]
+
+        self._feats["query"] = [
+            item.permute(0, 2, 3, 1).flatten(start_dim=-2, end_dim=-1)[
+                :, 1 + register_size :, :
+            ]
+            for item in self._feats["query"]
+        ]
+        self._feats["value"] = [
+            item.permute(0, 2, 3, 1).flatten(start_dim=-2, end_dim=-1)[
+                :, 1 + register_size :, :
+            ]
+            for item in self._feats["value"]
+        ]
+
+        self._feats["token"] = torch.stack(self._feats["token"], dim=0).permute(1, 0, 2, 3)
+        self._feats["key"] = torch.stack(self._feats["key"], dim=0).permute(1, 0, 2, 3)
+        self._feats["query"] = torch.stack(self._feats["query"], dim=0).permute(1, 0, 2, 3)
+        self._feats["value"] = torch.stack(self._feats["value"], dim=0).permute(1, 0, 2, 3)
 
         return self._feats
 

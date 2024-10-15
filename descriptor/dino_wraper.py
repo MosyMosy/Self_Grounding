@@ -45,8 +45,10 @@ class Dino_Wraper(Descriptor_Base):
         )
         self.name = f"Dino_{model_type}_obj_point_size_{self.obj_point_size}_num_temp_{self.num_templates_per_obj}"
 
-    def encode_image_base(self, image: torch.Tensor, scaled: bool = False):
-        features = self.model.get_intermediate_layers(image)[0]
+    def encode_image_base(
+        self, image: torch.Tensor, scaled: bool = False, q_list: torch.Tensor = None
+    ):
+        features = self.model.get_intermediate_layers(image, q_list=q_list)[0]
         features /= torch.norm(features, dim=-1, keepdim=True)
         return features
 
@@ -90,14 +92,21 @@ class Dino_Descriptors(Dino_Wraper):
             - (patch_division_W - 1),
         )
 
-    def encode_image_base(self, image: torch.Tensor, scaled: bool = False):
+    def encode_image_base(
+        self, image: torch.Tensor, scaled: bool = False, q_list: torch.Tensor = None
+    ):
+        assert (
+            len(q_list) == self.depth
+        ), f"q_list should have {self.depth} elements (Network's layers)"
+        layers = [i for i in range(self.depth)]
         features = self.extractor.extract_descriptors(
             image,
-            layer_idx=self.depth - 1,
+            q_list=q_list,
+            layer_idx=layers,
             register_size=self.model.num_register_tokens,
         )
         features = torch.stack(
             [features["query"], features["key"], features["value"], features["token"]],
-            dim=1,
+            dim=2,
         )
         return features

@@ -91,17 +91,17 @@ def extract_features(image, masks, descriptor, inplane_rotation=False, batch_siz
             is_scaled=True,
         )
 
-        normal_embeddings.append(normal_embedding)
-        normal_embeddings_averages.append(normal_embedding_average)
-        scaled_embeddings.append(scaled_embedding)
+        # normal_embeddings.append(normal_embedding)
+        # normal_embeddings_averages.append(normal_embedding_average)
+        # scaled_embeddings.append(scaled_embedding)
         scaled_embeddings_average.append(scaled_embedding_average)
         scaled_images.append(images_batched_scaled)
         scaled_masks.append(mask_batched_scaled)
 
-    normal_embeddings = torch.cat(normal_embeddings)
-    normal_embeddings_averages = torch.cat(normal_embeddings_averages)
-    scaled_embeddings = torch.cat(scaled_embeddings)
-    scaled_embeddings_average = torch.cat(scaled_embeddings_average)
+    # normal_embeddings = torch.cat(normal_embeddings, dim=0)
+    # normal_embeddings_averages =torch.cat(normal_embeddings_averages, dim=0)
+    # scaled_embeddings = torch.cat(scaled_embeddings, dim=0)
+    scaled_embeddings_average = torch.cat(scaled_embeddings_average, dim=0)
     scaled_images = torch.cat(scaled_images)
     scaled_masks = torch.cat(scaled_masks)
 

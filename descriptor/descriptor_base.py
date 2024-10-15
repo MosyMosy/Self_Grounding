@@ -4,6 +4,13 @@ import warnings
 # from segment_anything import SamPredictor, sam_model_registry
 from torchvision import transforms
 from dataset.util import CropResizePad_v2
+from descriptor.DinoV2.vision_transformer import (
+    DinoVisionTransformer,
+    vit_base,
+    vit_large,
+    vit_small,
+    vit_giant2,
+)
 
 
 model_types = ["vits14_reg", "vitb14_reg", "vitl14_reg", "vitg14_reg"]
@@ -12,6 +19,20 @@ channel_sizes = {
     "vitb14_reg": 768,
     "vitl14_reg": 1024,
     "vitg14_reg": 1536,
+}
+
+model_builders = {
+    "vits14_reg": vit_small,
+    "vitb14_reg": vit_base,
+    "vitl14_reg": vit_large,
+    "vitg14_reg": vit_giant2,
+}
+
+checkpoint_dic = {
+    "vits14_reg": "checkpoints/Dino_Wraper/dinov2_vits14_reg4_pretrain.pth",
+    "vitb14_reg": "checkpoints/Dino_Wraper/dinov2_vitb14_reg4_pretrain.pth",
+    "vitl14_reg": "checkpoints/Dino_Wraper/dinov2_vitl14_reg4_pretrain.pth",
+    "vitg14_reg": "checkpoints/Dino_Wraper/dinov2_vitg14_reg4_pretrain.pth",
 }
 
 
@@ -30,9 +51,20 @@ class Descriptor_Base:
     ) -> None:
         assert model_type in model_types, f"model_type should be one of {model_types}"
         with warnings.catch_warnings():
-            self.model = torch.hub.load(
-                "facebookresearch/dinov2", f"dinov2_{model_type}"
+            # self.model = torch.hub.load(
+            #     "facebookresearch/dinov2", f"dinov2_{model_type}"
+            # )
+            self.model = model_builders[model_type](
+                num_register_tokens=4,
+                patch_size=14,
+                img_size=526,
+                init_values=1.0,
+                block_chunks=0,
             )
+            model_dict = torch.load(
+                checkpoint_dic[model_type], map_location="cpu", weights_only=False
+            )
+            self.model.load_state_dict(model_dict)
         self.model.eval()
         self.model.to(device)
 
@@ -71,11 +103,11 @@ class Descriptor_Base:
 
         self.name = f"Dino_{model_type}_obj_point_size_{self.obj_point_size}_num_temp_{self.num_templates_per_obj}"
 
-    def encode_image_base(self, image: torch.Tensor, scaled: bool = False):
+    def encode_image_base(self, image: torch.Tensor, scaled: bool = False, q_list:torch.tensor=None):
         raise NotImplementedError
 
     def encode_image_with_rotation(
-        self, image: torch.Tensor, inplane_rotation=False, scaled=False
+        self, image: torch.Tensor, inplane_rotation=False, scaled=False, q_list:torch.tensor=None
     ):
         with torch.no_grad():
             B_in = image.shape[0]
@@ -90,8 +122,8 @@ class Descriptor_Base:
                     ],
                     dim=0,
                 )
-                features = self.encode_image_base(image, scaled=scaled)
-                features = features.flatten(0, 1)
+                features = self.encode_image_base(image, scaled=scaled, q_list=q_list)
+                features = features.flatten(0, 1, 2)
                 B_feat = features.shape[0]
                 features = features.permute(0, 2, 1).view(
                     B_feat * 4,
@@ -120,11 +152,11 @@ class Descriptor_Base:
                 features = features.permute(0, 2, 3, 1).view(B_feat, -1, C)
                 features = features.view(B_in, B_feat // B_in, -1, C).mean(dim=1)
             else:
-                features = self.encode_image_base(image, scaled=scaled)
+                features = self.encode_image_base(image, scaled=scaled, q_list=q_list)
         return features
 
     def encode_image(
-        self, image: torch.Tensor, inplane_rotation=False, mask=None, is_scaled=False
+        self, image: torch.Tensor, inplane_rotation=False, mask=None, is_scaled=False, q_list:torch.tensor=None
     ):
         if (not is_scaled) and (
             image.shape[-1] != self.input_size[-1]
@@ -136,13 +168,13 @@ class Descriptor_Base:
             image_sized = image
 
         features = self.encode_image_with_rotation(
-            image_sized, inplane_rotation=inplane_rotation
+            image_sized, inplane_rotation=inplane_rotation, q_list=q_list, scaled=is_scaled
         )
-        features = features.permute(0, 1, 3, 2)
+        features = features.permute(0, 1, 2, 4, 3)
         spatial_size = (
             self.scaled_output_spacial_size if is_scaled else self.output_spatial_size
         )
-        features = features.view(*features.shape[:3], *spatial_size)
+        features = features.view(*features.shape[:4], *spatial_size)
         if mask is not None:
             masks_patched = (
                 torch.functional.F.interpolate(
@@ -152,8 +184,8 @@ class Descriptor_Base:
                 )
                 > 0.5
             )
-            features_average = (features * masks_patched.unsqueeze(1)).sum(
-                dim=(3, 4)
+            features_average = (features * masks_patched.unsqueeze(1).unsqueeze(1)).sum(
+                dim=(4, 5)
             ) / (masks_patched.sum() + 1e-8)
             return features, features_average, masks_patched
         else:
