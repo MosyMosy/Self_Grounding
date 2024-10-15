@@ -158,12 +158,12 @@ class ViTExtractor:
         self.hook_handlers = []
 
     def _extract_features(
-        self, batch: torch.Tensor, q_list: torch.Tensor = None, layer_idx: list = [11]
+        self, batch: torch.Tensor, g_info: torch.Tensor = None, layer_idx: list = [11]
     ) -> List[torch.Tensor]:
         B, C, H, W = batch.shape
         self._feats = {"token": [], "atten": [], "key": [], "query": [], "value": []}
         self._register_hooks(layer_idx)
-        _ = self.model(batch, q_list=q_list)
+        _ = self.model(batch, g_info=g_info)
         self._unregister_hooks()
         self.load_size = (H, W)
 
@@ -172,11 +172,11 @@ class ViTExtractor:
     def extract_descriptors(
         self,
         batch: torch.Tensor,
-        q_list: torch.Tensor = None,
+        g_info: torch.Tensor = None,
         layer_idx: list = [23],
         register_size=4,
     ) -> torch.Tensor:
-        self._extract_features(batch, q_list, layer_idx)
+        self._extract_features(batch, g_info, layer_idx)
         self._feats["token"] = [
             item[0][:, 1 + register_size :, :] for item in self._feats["token"]
         ]

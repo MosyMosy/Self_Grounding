@@ -212,10 +212,7 @@ def run_pipeline(device):
         obj_id = 0
         obj_template_id = 6
 
-        reference_query = objs_average_feats_scaled[obj_id, -1, 0, :]
         reference_token = objs_average_feats_scaled[obj_id, -1, 3, :]
-
-        reference_query = reference_query.unsqueeze(0)
         reference_token = reference_token.unsqueeze(0)
 
         for i, test_sample in tqdm(
@@ -226,60 +223,31 @@ def run_pipeline(device):
             H_org, W_org = test_image.shape[-2:]
 
             test_embedding = descriptor.encode_image(
-                test_image, q_list=objs_average_feats_scaled[0, :, 0, :]
+                test_image, g_info=objs_average_feats_scaled[0, :, :, :]
             )[0][-1]
-            test_embedding_query = (
-                test_embedding[0, :, :, :].flatten(1, 2).permute(1, 0)
-            )
             test_embedding_token = (
                 test_embedding[3, :, :, :].flatten(1, 2).permute(1, 0)
             )
-
             for head in range(17):
                 head_range_start = head * 64
                 head_range_end = (head + 1) * 64
                 if head < 16:
-                    reference_query_head = reference_query[
+                    reference_query_head = reference_token[
                         :, head_range_start:head_range_end
                     ]
-                    test_embedding_query_head = test_embedding_query[
-                        :, head_range_start:head_range_end
-                    ]
-
-                    reference_token_head = reference_token[
-                        :, head_range_start:head_range_end
-                    ]
-                    test_embedding_token_head = test_embedding_token[
+                    test_embedding_query_head = test_embedding_token[
                         :, head_range_start:head_range_end
                     ]
 
                 else:
-                    reference_query_head = reference_query
-                    test_embedding_query_head = test_embedding_query
-
-                    reference_token_head = reference_token
-                    test_embedding_token_head = test_embedding_token
+                    reference_query_head = reference_token
+                    test_embedding_query_head = test_embedding_token
 
                 reference_query_head /= reference_query_head.norm(dim=-1, keepdim=True)
                 test_embedding_query_head /= test_embedding_query_head.norm(
                     dim=-1, keepdim=True
                 )
-                query_sim = test_embedding_query_head @ reference_query_head.t()
-                # query_sim_normal = (query_sim - query_sim.min()) / (
-                #     query_sim.max() - query_sim.min()
-                # )
-                # key_average = (test_embedding_token_head * query_sim_normal).sum(
-                #     dim=0
-                # ) / query_sim_normal.sum()
-                # test_embedding_token_head -= (
-                #     1 - query_sim_normal
-                # ) * key_average.unsqueeze(0)
-
-                reference_token_head /= reference_token_head.norm(dim=-1, keepdim=True)
-                test_embedding_token_head /= test_embedding_token_head.norm(
-                    dim=-1, keepdim=True
-                )
-                fore_sim = test_embedding_token_head @ reference_token_head.t()
+                fore_sim = test_embedding_query_head @ reference_query_head.t()
 
                 fore_sim = fore_sim.view(-1, *descriptor.output_spatial_size)
                 fore_sim = torch.nn.functional.interpolate(

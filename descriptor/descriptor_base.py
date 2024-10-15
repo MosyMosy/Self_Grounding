@@ -103,11 +103,11 @@ class Descriptor_Base:
 
         self.name = f"Dino_{model_type}_obj_point_size_{self.obj_point_size}_num_temp_{self.num_templates_per_obj}"
 
-    def encode_image_base(self, image: torch.Tensor, scaled: bool = False, q_list:torch.tensor=None):
+    def encode_image_base(self, image: torch.Tensor, scaled: bool = False, g_info:torch.tensor=None):
         raise NotImplementedError
 
     def encode_image_with_rotation(
-        self, image: torch.Tensor, inplane_rotation=False, scaled=False, q_list:torch.tensor=None
+        self, image: torch.Tensor, inplane_rotation=False, scaled=False, g_info:torch.tensor=None
     ):
         with torch.no_grad():
             B_in = image.shape[0]
@@ -122,7 +122,7 @@ class Descriptor_Base:
                     ],
                     dim=0,
                 )
-                features = self.encode_image_base(image, scaled=scaled, q_list=q_list)
+                features = self.encode_image_base(image, scaled=scaled, g_info=g_info)
                 features = features.flatten(0, 1, 2)
                 B_feat = features.shape[0]
                 features = features.permute(0, 2, 1).view(
@@ -152,11 +152,11 @@ class Descriptor_Base:
                 features = features.permute(0, 2, 3, 1).view(B_feat, -1, C)
                 features = features.view(B_in, B_feat // B_in, -1, C).mean(dim=1)
             else:
-                features = self.encode_image_base(image, scaled=scaled, q_list=q_list)
+                features = self.encode_image_base(image, scaled=scaled, g_info=g_info)
         return features
 
     def encode_image(
-        self, image: torch.Tensor, inplane_rotation=False, mask=None, is_scaled=False, q_list:torch.tensor=None
+        self, image: torch.Tensor, inplane_rotation=False, mask=None, is_scaled=False, g_info:torch.tensor=None
     ):
         if (not is_scaled) and (
             image.shape[-1] != self.input_size[-1]
@@ -168,7 +168,7 @@ class Descriptor_Base:
             image_sized = image
 
         features = self.encode_image_with_rotation(
-            image_sized, inplane_rotation=inplane_rotation, q_list=q_list, scaled=is_scaled
+            image_sized, inplane_rotation=inplane_rotation, g_info=g_info, scaled=is_scaled
         )
         features = features.permute(0, 1, 2, 4, 3)
         spatial_size = (

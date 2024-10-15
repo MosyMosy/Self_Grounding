@@ -53,7 +53,8 @@ class Attention(nn.Module):
         self.proj = nn.Linear(dim, dim, bias=proj_bias)
         self.proj_drop = nn.Dropout(proj_drop)
 
-    def forward(self, x: Tensor, q_list: Tensor=None) -> Tensor:
+    def forward(self, x: Tensor, g_info: Tensor = None) -> Tensor:
+        g_info_layer = g_info[0]
         B, N, C = x.shape
         qkv = (
             self.qkv(x)
@@ -70,16 +71,17 @@ class Attention(nn.Module):
         x = (attn @ v).transpose(1, 2).reshape(B, N, C)
         x = self.proj(x)
         x = self.proj_drop(x)
-        return x
+        return x, g_info[1:]
 
 
 class MemEffAttention(Attention):
-    def forward(self, x: Tensor, q_list: Tensor=None, attn_bias=None) -> Tensor:
+    def forward(self, x: Tensor, g_info: Tensor = None, attn_bias=None) -> Tensor:
         if not XFORMERS_AVAILABLE:
             if attn_bias is not None:
                 raise AssertionError("xFormers is required for using nested tensors")
             return super().forward(x)
-
+        g_info_layer = g_info[0]
+        
         B, N, C = x.shape
         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads)
 
@@ -90,4 +92,4 @@ class MemEffAttention(Attention):
 
         x = self.proj(x)
         x = self.proj_drop(x)
-        return x
+        return x, g_info[1:]

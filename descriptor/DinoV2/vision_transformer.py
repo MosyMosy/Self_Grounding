@@ -251,14 +251,14 @@ class DinoVisionTransformer(nn.Module):
             )
         return output
 
-    def forward_features(self, x, q_list:torch.Tensor=None, masks=None):
+    def forward_features(self, x, g_info:torch.Tensor=None, masks=None):
         if isinstance(x, list):
             return self.forward_features_list(x, masks)
 
         x = self.prepare_tokens_with_masks(x, masks)
 
         for blk in self.blocks:
-            x, q_list = blk(x, q_list)
+            x, g_info = blk(x, g_info)
 
         x_norm = self.norm(x)
         return {
@@ -281,14 +281,14 @@ class DinoVisionTransformer(nn.Module):
         assert len(output) == len(blocks_to_take), f"only {len(output)} / {len(blocks_to_take)} blocks found"
         return output
 
-    def _get_intermediate_layers_chunked(self, x,q_list:torch.Tensor=None, n=1):
+    def _get_intermediate_layers_chunked(self, x,g_info:torch.Tensor=None, n=1):
         x = self.prepare_tokens_with_masks(x)
         output, i, total_block_len = [], 0, len(self.blocks[-1])
         # If n is an int, take the n last blocks. If it's a list, take them
         blocks_to_take = range(total_block_len - n, total_block_len) if isinstance(n, int) else n
         for block_chunk in self.blocks:
             for blk in block_chunk[i:]:  # Passing the nn.Identity()
-                x, q_list = blk(x, q_list)
+                x, g_info = blk(x, g_info)
                 if i in blocks_to_take:
                     output.append(x)
                 i += 1
@@ -298,16 +298,16 @@ class DinoVisionTransformer(nn.Module):
     def get_intermediate_layers(
         self,
         x: torch.Tensor,
-        q_list:torch.Tensor=None,
+        g_info:torch.Tensor=None,
         n: Union[int, Sequence] = 1,  # Layers or n last layers to take
         reshape: bool = False,
         return_class_token: bool = False,
         norm=True,
     ) -> Tuple[Union[torch.Tensor, Tuple[torch.Tensor]]]:
         if self.chunked_blocks:
-            outputs = self._get_intermediate_layers_chunked(x,q_list, n)
+            outputs = self._get_intermediate_layers_chunked(x,g_info, n)
         else:
-            outputs = self._get_intermediate_layers_not_chunked(x,q_list, n)
+            outputs = self._get_intermediate_layers_not_chunked(x,g_info, n)
         if norm:
             outputs = [self.norm(out) for out in outputs]
         class_tokens = [out[:, 0] for out in outputs]
