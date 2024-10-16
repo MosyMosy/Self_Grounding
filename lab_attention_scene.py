@@ -224,9 +224,9 @@ def run_pipeline(device):
 
             test_embedding = descriptor.encode_image(
                 test_image, g_info=objs_average_feats_scaled[0, :, :, :]
-            )[0][-1]
+            )[0]
             test_embedding_token = (
-                test_embedding[3, :, :, :].flatten(1, 2).permute(1, 0)
+                test_embedding[-1,3, :, :, :].flatten(1, 2).permute(1, 0)
             )
             for head in range(17):
                 head_range_start = head * 64

@@ -120,7 +120,7 @@ class ViTExtractor:
             qkv = (
                 module.qkv(input)
                 .reshape(B, N, 3, module.num_heads, C // module.num_heads)
-                .permute(2, 0, 3, 1, 4)
+                .permute(2, 0, 1, 3, 4)
             )
             self._feats["query"].append(qkv[0])
             self._feats["key"].append(qkv[1])
@@ -183,20 +183,20 @@ class ViTExtractor:
         # self._feats["atten"] = self._feats["atten"][0][:, 1 + register_size :, :]
 
         self._feats["key"] = [
-            item.permute(0, 2, 3, 1).flatten(start_dim=-2, end_dim=-1)[
+            item.flatten(start_dim=-2, end_dim=-1)[
                 :, 1 + register_size :, :
             ]
             for item in self._feats["key"]
         ]
 
         self._feats["query"] = [
-            item.permute(0, 2, 3, 1).flatten(start_dim=-2, end_dim=-1)[
+            item.flatten(start_dim=-2, end_dim=-1)[
                 :, 1 + register_size :, :
             ]
             for item in self._feats["query"]
         ]
         self._feats["value"] = [
-            item.permute(0, 2, 3, 1).flatten(start_dim=-2, end_dim=-1)[
+            item.flatten(start_dim=-2, end_dim=-1)[
                 :, 1 + register_size :, :
             ]
             for item in self._feats["value"]
