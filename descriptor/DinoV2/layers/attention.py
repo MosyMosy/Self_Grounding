@@ -81,48 +81,74 @@ class MemEffAttention(Attention):
             if attn_bias is not None:
                 raise AssertionError("xFormers is required for using nested tensors")
             return super().forward(x)
-        g_info_layer = g_info[0]
 
         B, N, C = x.shape
         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads)
 
         q, k, v = unbind(qkv, 2)
 
-        g_info_layer = g_info_layer.reshape(
-            g_info_layer.shape[0], self.num_heads, C // self.num_heads
-        )
-        q_g = g_info_layer[0]
-        k_g = g_info_layer[1]
-        v_g = g_info_layer[2]
-        t_g = g_info_layer[3]
+        if g_info is not None:
+            g_info_layer = g_info[0]
+            new_g_info = g_info[1:]
 
-        k_g = k_g.unsqueeze(0).unsqueeze(0)  # .repeat(B, N, 1, 1)
-        q_g = q_g.unsqueeze(0).unsqueeze(0)
+            g_info_layer = g_info_layer.reshape(
+                g_info_layer.shape[0], self.num_heads, C // self.num_heads
+            )
+            q_g = g_info_layer[0].unsqueeze(0).unsqueeze(0)
+            k_g = g_info_layer[1].unsqueeze(0).unsqueeze(0)
 
-        k_min = k.flatten(2, 3).min(dim=-1).values.unsqueeze(-1).unsqueeze(-1)
-        k_max = k.flatten(2, 3).max(dim=-1).values.unsqueeze(-1).unsqueeze(-1)
-        k_g_min = k_g.flatten(2, 3).min(dim=-1).values.unsqueeze(-1).unsqueeze(-1)
-        k_g_max = k_g.flatten(2, 3).max(dim=-1).values.unsqueeze(-1).unsqueeze(-1)
-        k_g_scaled = (k_g - k_g_min) / (k_g_max - k_g_min)
-        k_g_scaled = k_g_scaled * (k_max - k_min) + k_min
+            q_normalized = q / q.norm(dim=-1, keepdim=True)
+            q_g_normalized = q_g / q_g.norm(dim=-1, keepdim=True)
+            q_sim = (q_g_normalized * q_normalized).sum(dim=-1)
 
-        q_min = q.flatten(2, 3).min(dim=-1).values.unsqueeze(-1).unsqueeze(-1)
-        q_max = q.flatten(2, 3).max(dim=-1).values.unsqueeze(-1).unsqueeze(-1)
-        q_g_min = q_g.flatten(2, 3).min(dim=-1).values.unsqueeze(-1).unsqueeze(-1)
-        q_g_max = q_g.flatten(2, 3).max(dim=-1).values.unsqueeze(-1).unsqueeze(-1)
-        q_g_scaled = (q_g - q_g_min) / (q_g_max - q_g_min)
-        q_g_scaled = q_g_scaled * (q_max - q_min) + q_min
+            augmented_k = k + (q * q_sim.unsqueeze(-1))
 
-        k_fused = (k + k_g)
-        q_fused = (q + q_g)
-
-        if len(g_info) > 0:
-            x = memory_efficient_attention(q_fused, k_fused, v)
+            x = memory_efficient_attention(q, augmented_k, v, attn_bias=attn_bias)
         else:
-            x = memory_efficient_attention(q, k, v)
-
+            new_g_info = None
+            x = memory_efficient_attention(q, k, v, attn_bias=attn_bias)
         x = x.reshape([B, N, C])
 
         x = self.proj(x)
         x = self.proj_drop(x)
-        return x, g_info[1:]
+        return x, new_g_info
+
+
+# class MemEffAttention(Attention):
+#     def forward(self, x: Tensor, g_info: Tensor = None, attn_bias=None) -> Tensor:
+#         if not XFORMERS_AVAILABLE:
+#             if attn_bias is not None:
+#                 raise AssertionError("xFormers is required for using nested tensors")
+#             return super().forward(x)
+
+#         B, N, C = x.shape
+#         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads)
+
+#         q, k, v = unbind(qkv, 2)
+
+#         if g_info is not None:
+#             g_info_layer = g_info[0]
+#             new_g_info = g_info[1:]
+
+#             g_info_layer = g_info_layer.reshape(
+#                 g_info_layer.shape[0], self.num_heads, C // self.num_heads
+#             )
+#             q_g = g_info_layer[0].unsqueeze(0).unsqueeze(0)
+#             k_g = g_info_layer[1].unsqueeze(0).unsqueeze(0)
+
+#             if len(g_info == 1):
+#                 q_fused = torch.cat([q[:, :5], q[:, 5:] + q_g], dim=1)
+#                 k_fused = torch.cat([k[:, :5], k[:, 5:] + k_g], dim=1)
+#             else:
+#                 q_fused = q
+#                 k_fused = k
+
+#             x = memory_efficient_attention(q_fused, k_fused, v, attn_bias=attn_bias)
+#         else:
+#             new_g_info = None
+#             x = memory_efficient_attention(q, k, v, attn_bias=attn_bias)
+#         x = x.reshape([B, N, C])
+
+#         x = self.proj(x)
+#         x = self.proj_drop(x)
+#         return x, new_g_info

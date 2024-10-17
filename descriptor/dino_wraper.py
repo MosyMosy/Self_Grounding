@@ -95,9 +95,9 @@ class Dino_Descriptors(Dino_Wraper):
     def encode_image_base(
         self, image: torch.Tensor, scaled: bool = False, g_info: torch.Tensor = None
     ):
-        assert (
-            len(g_info) == self.depth
-        ), f"g_info should have {self.depth} elements (Network's layers)"
+        # assert (
+        #     len(g_info) == self.depth
+        # ), f"g_info should have {self.depth} elements (Network's layers)"
         layers = [i for i in range(self.depth)]
         features = self.extractor.extract_descriptors(
             image,
