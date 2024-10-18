@@ -59,7 +59,9 @@ def seed_all(seed):
         torch.backends.cudnn.benchmark = False
 
 
-def extract_features(image, masks, descriptor, inplane_rotation=False, batch_size=2):
+def extract_features(
+    image, masks, descriptor, inplane_rotation=False, batch_size=2, g_info=None
+):
     image_sized = descriptor.cropper(image)
     masks_sized = descriptor.cropper(masks)
 
@@ -76,7 +78,7 @@ def extract_features(image, masks, descriptor, inplane_rotation=False, batch_siz
     for images_batched, mask_batched in image_mask_dl:
         normal_embedding, normal_embedding_average, patched_mask = (
             descriptor.encode_image(
-                images_batched, mask=mask_batched, inplane_rotation=False
+                images_batched, mask=mask_batched, inplane_rotation=False, g_info=g_info
             )
         )
 
@@ -89,6 +91,7 @@ def extract_features(image, masks, descriptor, inplane_rotation=False, batch_siz
             mask=mask_batched_scaled,
             inplane_rotation=inplane_rotation,
             is_scaled=True,
+            g_info=g_info,
         )
 
         # normal_embeddings.append(normal_embedding)

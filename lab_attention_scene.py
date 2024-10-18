@@ -146,16 +146,27 @@ def run_pipeline(device):
                     image = sample["image"][0].to(device)
                     masks = sample["mask"][0].to(device)
                     image *= masks
-                    (
-                        obj_templates_feat,
-                        obj_templates_average_feat,
-                        scaled_obj_templates_feat,
-                        scaled_obj_templates_average_feat,
-                        scaled_images,
-                        scaled_masks,
-                    ) = extract_features(
-                        image, masks, descriptor, inplane_rotation=False, batch_size=1
-                    )
+
+                    obj_average_feats_scaled = None
+                    for iter in range(1 + 0):
+                        (
+                            obj_templates_feat,
+                            obj_templates_average_feat,
+                            scaled_obj_templates_feat,
+                            scaled_obj_templates_average_feat,
+                            scaled_images,
+                            scaled_masks,
+                        ) = extract_features(
+                            image,
+                            masks,
+                            descriptor,
+                            inplane_rotation=True,
+                            batch_size=1,
+                            g_info=obj_average_feats_scaled,
+                        )
+                        obj_average_feats_scaled = (
+                            scaled_obj_templates_average_feat.mean(dim=0)
+                        )
 
                     for j in range(len(image)):
                         tvutils.save_image(
@@ -179,9 +190,7 @@ def run_pipeline(device):
                     # obj_templates_average_feats_scaled.append(
                     #     scaled_obj_templates_average_feat
                     # )
-                    objs_average_feats_scaled.append(
-                        scaled_obj_templates_average_feat.mean(dim=0)
-                    )
+                    objs_average_feats_scaled.append(obj_average_feats_scaled)
                 # obj_templates_feats = torch.stack(obj_templates_feats)
                 # obj_templates_average_feats = torch.stack(obj_templates_average_feats)
 
@@ -253,8 +262,8 @@ def run_pipeline(device):
                 fore_sim = torch.nn.functional.interpolate(
                     fore_sim.unsqueeze(0), size=(H_org, W_org)
                 )
-                fore_sim[fore_sim < 0.5] = 0
-                
+                # fore_sim[fore_sim < 0.5] = 0
+
                 fore_sim = fore_sim.squeeze(0).squeeze(0).cpu().numpy()
 
                 plt.figure(figsize=(10, 10))
