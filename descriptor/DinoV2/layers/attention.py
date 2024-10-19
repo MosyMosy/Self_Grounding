@@ -96,6 +96,111 @@ class MemEffAttention(Attention):
                 g_info_layer.shape[0], self.num_heads, C // self.num_heads
             )
             q_g = g_info_layer[0].unsqueeze(0).unsqueeze(0)
+            k_g = g_info_layer[1].unsqueeze(0).unsqueeze(0)
+            v_g = g_info_layer[2].unsqueeze(0).unsqueeze(0)
+            t_g = g_info_layer[3].unsqueeze(0).unsqueeze(0)
+
+            q_normalized = q / q.norm(dim=-1, keepdim=True)
+            q_g_normalized = q_g / q_g.norm(dim=-1, keepdim=True)
+            q_sim = (q_g_normalized * q_normalized).sum(dim=-1).unsqueeze(-1)
+
+            k_normalized = k / k.norm(dim=-1, keepdim=True)
+            k_g_normalized = k_g / k_g.norm(dim=-1, keepdim=True)
+            k_sim = (k_g_normalized * k_normalized).sum(dim=-1).unsqueeze(-1)
+
+            v_normalized = v / v.norm(dim=-1, keepdim=True)
+            v_g_normalized = v_g / v_g.norm(dim=-1, keepdim=True)
+            v_sim = (v_g_normalized * v_normalized).sum(dim=-1).unsqueeze(-1)
+
+            q_sim_scale = (q_sim - q_sim.min()) / (q_sim.max() - q_sim.min())
+            k_sim_scale = (k_sim - k_sim.min()) / (k_sim.max() - k_sim.min())
+            v_sim_scale = (v_sim - v_sim.min()) / (v_sim.max() - v_sim.min())
+
+            x = memory_efficient_attention(q, k, v, attn_bias=attn_bias)
+            x = x * (q_sim_scale + k_sim_scale)
+        else:
+            new_g_info = None
+            x = memory_efficient_attention(q, k, v, attn_bias=attn_bias)
+        x = x.reshape([B, N, C])
+
+        x = self.proj(x)
+        x = self.proj_drop(x)
+
+        return x, new_g_info
+
+
+# class MemEffAttention(Attention):
+#     def forward(self, x: Tensor, g_info: Tensor = None, attn_bias=None) -> Tensor:
+#         if not XFORMERS_AVAILABLE:
+#             if attn_bias is not None:
+#                 raise AssertionError("xFormers is required for using nested tensors")
+#             return super().forward(x)
+
+#         B, N, C = x.shape
+#         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads)
+
+#         q, k, v = unbind(qkv, 2)
+
+#         if g_info is not None:
+#             g_info_layer = g_info[0]
+#             new_g_info = g_info[1:]
+
+#             g_info_layer = g_info_layer.reshape(
+#                 g_info_layer.shape[0], self.num_heads, C // self.num_heads
+#             )
+#             q_g = g_info_layer[0].unsqueeze(0).unsqueeze(0)
+#             k_g = g_info_layer[1].unsqueeze(0).unsqueeze(0)
+#             v_g = g_info_layer[2].unsqueeze(0).unsqueeze(0)
+#             t_g = g_info_layer[3].unsqueeze(0).unsqueeze(0)
+
+#             q_normalized = q / q.norm(dim=-1, keepdim=True)
+#             q_g_normalized = q_g / q_g.norm(dim=-1, keepdim=True)
+#             q_sim = (q_g_normalized * q_normalized).sum(dim=-1).unsqueeze(-1)
+#             q_sim[:,:5] = 0
+
+#             k_normalized = k / k.norm(dim=-1, keepdim=True)
+#             k_g_normalized = k_g / k_g.norm(dim=-1, keepdim=True)
+#             k_sim = (k_g_normalized * k_normalized).sum(dim=-1).unsqueeze(-1)
+#             k_sim[:,:5] = 0
+
+
+#             q_augmented = q + (k * k_sim)
+#             k_augmented = k + (q * q_sim)
+#             v_augmented = v - ( v_g * (q_sim + k_sim))
+
+#             x = memory_efficient_attention(q, k, v_augmented, attn_bias=attn_bias)
+#         else:
+#             new_g_info = None
+#             x = memory_efficient_attention(q, k, v, attn_bias=attn_bias)
+#         x = x.reshape([B, N, C])
+
+#         x = self.proj(x)
+#         x = self.proj_drop(x)
+
+#         return x, new_g_info
+
+
+"""
+class MemEffAttention(Attention):
+    def forward(self, x: Tensor, g_info: Tensor = None, attn_bias=None) -> Tensor:
+        if not XFORMERS_AVAILABLE:
+            if attn_bias is not None:
+                raise AssertionError("xFormers is required for using nested tensors")
+            return super().forward(x)
+
+        B, N, C = x.shape
+        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads)
+
+        q, k, v = unbind(qkv, 2)
+
+        if g_info is not None:
+            g_info_layer = g_info[0]
+            new_g_info = g_info[1:]
+
+            g_info_layer = g_info_layer.reshape(
+                g_info_layer.shape[0], self.num_heads, C // self.num_heads
+            )
+            q_g = g_info_layer[0].unsqueeze(0).unsqueeze(0)
 
             q_normalized = q / q.norm(dim=-1, keepdim=True)
             q_g_normalized = q_g / q_g.norm(dim=-1, keepdim=True)
@@ -113,4 +218,4 @@ class MemEffAttention(Attention):
         x = self.proj(x)
         x = self.proj_drop(x)
 
-        return x, new_g_info
+        return x, new_g_info"""

@@ -160,7 +160,7 @@ def run_pipeline(device):
                             image,
                             masks,
                             descriptor,
-                            inplane_rotation=True,
+                            inplane_rotation=False,
                             batch_size=1,
                             g_info=obj_average_feats_scaled,
                         )
@@ -262,8 +262,11 @@ def run_pipeline(device):
                 fore_sim = torch.nn.functional.interpolate(
                     fore_sim.unsqueeze(0), size=(H_org, W_org)
                 )
-                # fore_sim[fore_sim < 0.5] = 0
-
+                
+                print(
+                    f"sim_max: {fore_sim.max()} and sim_min: {fore_sim.min()}, difference: {fore_sim.max() - fore_sim.min()}"
+                )
+                # fore_sim[fore_sim < 0.4] = 0
                 fore_sim = fore_sim.squeeze(0).squeeze(0).cpu().numpy()
 
                 plt.figure(figsize=(10, 10))
