@@ -290,7 +290,6 @@ def run_pipeline(device):
                             # max_size=detector.input_size,
                         )
                     )
-                    test_image_sized = test_image_sized * 255
                     _ = detector.encode_image(
                         test_image_sized,
                         original_image_size=test_image.shape[-2:],

@@ -51,6 +51,7 @@ class Descriptor_Base:
     ) -> None:
         assert model_type in model_types, f"model_type should be one of {model_types}"
         with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
             # self.model = torch.hub.load(
             #     "facebookresearch/dinov2", f"dinov2_{model_type}"
             # )

@@ -36,6 +36,7 @@ class Sam_Wraper(Descriptor_Base):
     ) -> None:
         assert model_type in model_types, f"model_type should be one of {model_types}"
         with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
             self.sam = sam_model_registry[model_type](
                 checkpoint=checkpoint_dic[model_type],
             )

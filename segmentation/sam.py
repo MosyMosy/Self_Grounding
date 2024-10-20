@@ -16,6 +16,7 @@ class SAM_Seg(Base_Segmentation):
     def __init__(self, model_type="vit_h", device="cpu") -> None:
         super().__init__(device=device)
         with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
             self.sam = sam_model_registry[model_type](
                 checkpoint=SAM_Seg.checkpoint_dic[model_type],
             )
@@ -25,6 +26,7 @@ class SAM_Seg(Base_Segmentation):
 
     def encode_image(self, processed_image: torch.Tensor, original_image_size: tuple):
         embeddings = []
+        processed_image *= 255  # Convert to 0-255 range
         for i in range(len(processed_image)):
             with torch.no_grad():
                 self.predictor.set_torch_image(

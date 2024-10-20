@@ -30,6 +30,7 @@ class SAM2_Seg(Base_Segmentation):
     def __init__(self, model_type="hiera_l", device="cpu") -> None:
         super().__init__(device=device)
         with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
             self.predictor = SAM2ImagePredictor(
                 build_sam2(
                     SAM2_Seg.config_dic[model_type],
@@ -59,14 +60,17 @@ class SAM2_Seg(Base_Segmentation):
     def decode_mask_point(self, point_prompts: torch.Tensor, labels: torch.Tensor):
         with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
             masks, scores, _ = self.predict_torch(
-                point_coords=point_prompts, point_labels=labels, return_logits = True
+                point_coords=point_prompts, point_labels=labels, return_logits=True
             )
         return masks, scores
 
     def decode_mask_box(self, box_prompts: torch.Tensor):
         with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
             masks, scores, _ = self.predict_torch(
-                box=box_prompts, point_coords=None, point_labels=None, return_logits = True
+                box=box_prompts,
+                point_coords=None,
+                point_labels=None,
+                return_logits=True,
             )
         return masks, scores
 
