@@ -148,7 +148,7 @@ def run_pipeline(device):
                     image *= masks
 
                     obj_average_feats_scaled = None
-                    for iter in range(1 + 1):
+                    for iter in range(1 + 0):
                         (
                             obj_templates_feat,
                             obj_templates_average_feat,
@@ -237,56 +237,56 @@ def run_pipeline(device):
             test_embedding_token = (
                 test_embedding[3, :, :, :].flatten(1, 2).permute(1, 0)
             )
-            for head in range(17):
-                head_range_start = head * 64
-                head_range_end = (head + 1) * 64
-                if head < 16:
-                    reference_query_head = reference_token[
-                        :, head_range_start:head_range_end
-                    ]
-                    test_embedding_query_head = test_embedding_token[
-                        :, head_range_start:head_range_end
-                    ]
 
-                else:
-                    reference_query_head = reference_token
-                    test_embedding_query_head = test_embedding_token
+            reference_query_head = reference_token
+            test_embedding_query_head = test_embedding_token
+            
+            reference_query_head = reference_query_head.view(-1, 16, 64)
+            test_embedding_query_head = test_embedding_query_head.view(-1, 16, 64)
+            reference_query_head /= reference_query_head.norm(dim=-1, keepdim=True)
+            test_embedding_query_head /= test_embedding_query_head.norm(
+                dim=-1, keepdim=True
+            )            
+            reference_query_head = reference_query_head.view(-1, 1024)
+            test_embedding_query_head = test_embedding_query_head.view(-1, 1024)
+            
+            reference_query_head /= reference_query_head.norm(dim=-1, keepdim=True)
+            test_embedding_query_head /= test_embedding_query_head.norm(
+                dim=-1, keepdim=True
+            )
+            
+            
+            fore_sim = test_embedding_query_head @ reference_query_head.t()
 
-                reference_query_head /= reference_query_head.norm(dim=-1, keepdim=True)
-                test_embedding_query_head /= test_embedding_query_head.norm(
-                    dim=-1, keepdim=True
-                )
-                fore_sim = test_embedding_query_head @ reference_query_head.t()
+            fore_sim = fore_sim.view(-1, *descriptor.output_spatial_size)
+            fore_sim = torch.nn.functional.interpolate(
+                fore_sim.unsqueeze(0), size=(H_org, W_org)
+            )
 
-                fore_sim = fore_sim.view(-1, *descriptor.output_spatial_size)
-                fore_sim = torch.nn.functional.interpolate(
-                    fore_sim.unsqueeze(0), size=(H_org, W_org)
-                )
+            print(
+                f"sim_max: {fore_sim.max()} and sim_min: {fore_sim.min()}, difference: {fore_sim.max() - fore_sim.min()}"
+            )
+            fore_sim[fore_sim < 0.4] = 0
+            fore_sim = fore_sim.squeeze(0).squeeze(0).cpu().numpy()
 
-                print(
-                    f"sim_max: {fore_sim.max()} and sim_min: {fore_sim.min()}, difference: {fore_sim.max() - fore_sim.min()}"
-                )
-                fore_sim[fore_sim < 0.4] = 0
-                fore_sim = fore_sim.squeeze(0).squeeze(0).cpu().numpy()
+            plt.figure(figsize=(10, 10))
 
-                plt.figure(figsize=(10, 10))
+            plt.imshow(
+                descriptor.inv_trans(test_image)
+                .cpu()
+                .squeeze(0)
+                .permute(1, 2, 0)
+                .numpy()
+            )
+            plt.imshow(
+                fore_sim, cmap="jet", alpha=0.4
+            )  # Overlay attention map with transparency
+            plt.title("Attention weights")
 
-                plt.imshow(
-                    descriptor.inv_trans(test_image)
-                    .cpu()
-                    .squeeze(0)
-                    .permute(1, 2, 0)
-                    .numpy()
-                )
-                plt.imshow(
-                    fore_sim, cmap="jet", alpha=0.4
-                )  # Overlay attention map with transparency
-                plt.title("Attention weights")
-
-                plt.savefig(
-                    f"temp/lab_attention_scene/token_token/attention_weights{i}_{obj_id}_{head}.png"
-                )
-                plt.close()
+            plt.savefig(
+                f"temp/lab_attention_scene_layers/token_token/attention_weights{i}_{obj_id}.png"
+            )
+            plt.close()
 
             break
 
