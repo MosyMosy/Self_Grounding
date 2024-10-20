@@ -104,7 +104,7 @@ class Descriptor_Base:
         self.name = f"Dino_{model_type}_obj_point_size_{self.obj_point_size}_num_temp_{self.num_templates_per_obj}"
 
     def encode_image_base(
-        self, image: torch.Tensor, scaled: bool = False, g_info: torch.tensor = None
+        self, image: torch.Tensor, scaled: bool = False, g_info: torch.tensor = None, layers=None
     ):
         raise NotImplementedError
 
@@ -114,6 +114,7 @@ class Descriptor_Base:
         inplane_rotation=False,
         scaled=False,
         g_info: torch.tensor = None,
+        layers = None,
     ):
         with torch.no_grad():
             B_in = image.shape[0]
@@ -128,7 +129,7 @@ class Descriptor_Base:
                     ],
                     dim=0,
                 )
-                features = self.encode_image_base(image, scaled=scaled, g_info=g_info)
+                features = self.encode_image_base(image, scaled=scaled, g_info=g_info, layers=layers)
                 layer_attention_shape = features.shape[1:3]
                 features = features.flatten(0, 2)
                 B_feat = features.shape[0]
@@ -160,7 +161,7 @@ class Descriptor_Base:
                 features = features.permute(0, 2, 3, 1).view(B_feat, -1, C)
                 features = features.view(B_in, *layer_attention_shape, -1, C)
             else:
-                features = self.encode_image_base(image, scaled=scaled, g_info=g_info)
+                features = self.encode_image_base(image, scaled=scaled, g_info=g_info, layers=layers)
         return features
 
     def encode_image(
@@ -170,6 +171,7 @@ class Descriptor_Base:
         mask=None,
         is_scaled=False,
         g_info: torch.tensor = None,
+        layers=None,
     ):
         if (not is_scaled) and (
             image.shape[-1] != self.input_size[-1]
@@ -185,6 +187,7 @@ class Descriptor_Base:
             inplane_rotation=inplane_rotation,
             g_info=g_info,
             scaled=is_scaled,
+            layers=layers,
         )
         features = features.permute(0, 1, 2, 4, 3)
         spatial_size = (

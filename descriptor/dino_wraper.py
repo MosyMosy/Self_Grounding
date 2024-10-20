@@ -93,12 +93,17 @@ class Dino_Descriptors(Dino_Wraper):
         )
 
     def encode_image_base(
-        self, image: torch.Tensor, scaled: bool = False, g_info: torch.Tensor = None
+        self,
+        image: torch.Tensor,
+        scaled: bool = False,
+        g_info: torch.Tensor = None,
+        layers=None,
     ):
         # assert (
         #     len(g_info) == self.depth
         # ), f"g_info should have {self.depth} elements (Network's layers)"
-        layers = [i for i in range(self.depth)]
+        if layers is None:
+            layers = [self.depth - 1]
         features = self.extractor.extract_descriptors(
             image,
             g_info=g_info,
@@ -106,7 +111,14 @@ class Dino_Descriptors(Dino_Wraper):
             register_size=self.model.num_register_tokens,
         )
         features = torch.stack(
-            [features["query"], features["key"], features["value"], features["token"]],
+            [
+                features["query"],
+                features["key"],
+                features["value"],
+                features["token"],
+                features["cls_token"]
+                .repeat(1, 1, features["token"].shape[2], 1),
+            ],
             dim=2,
         )
         return features
